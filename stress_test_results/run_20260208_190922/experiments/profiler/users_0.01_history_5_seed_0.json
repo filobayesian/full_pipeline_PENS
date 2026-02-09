@@ -1,0 +1,51 @@
+{
+  "experiment": {
+    "user_fraction": 0.01,
+    "history_length": 5,
+    "seed": 0,
+    "model": "profiler",
+    "experiment_name": "users_0.01_history_5_seed_0",
+    "pens_root": "",
+    "output_dir": "",
+    "model_config": {
+      "use_external_sentiment": true,
+      "use_transformer_formality": false,
+      "use_spacy_ner": false,
+      "use_contrastive": true,
+      "min_interactions_for_confidence": 10,
+      "min_interactions_for_contrastive": 8,
+      "eval_metrics": [
+        "mean_abs_z",
+        "n_strong_prefs",
+        "n_very_strong_prefs",
+        "coverage",
+        "alignment_mean",
+        "alignment_std"
+      ]
+    }
+  },
+  "success": true,
+  "error": null,
+  "metrics": {
+    "n_users": 3632,
+    "coverage": 0.0,
+    "mean_abs_z": 0.40804334012858484,
+    "n_strong_prefs": 5.862885462555066,
+    "n_very_strong_prefs": 1.186398678414097,
+    "mean_history_size": 4.679515418502203,
+    "alignment_mean": 0.4314470025585019,
+    "alignment_std": 0.314640615338158
+  },
+  "data_stats": {
+    "n_interactions": 16996,
+    "n_users": 3632,
+    "interactions_per_user_mean": 4.679515418502203,
+    "interactions_per_user_median": 5.0,
+    "interactions_per_user_min": 1,
+    "interactions_per_user_max": 5,
+    "n_unique_headlines": 5340,
+    "dwell_time_mean": 201.94139797599436,
+    "dwell_time_median": 77.0
+  },
+  "runtime_seconds": 63.08226203918457
+}

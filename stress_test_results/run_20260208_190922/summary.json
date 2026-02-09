@@ -1,0 +1,13 @@
+{
+  "n_total": 1,
+  "n_successful": 1,
+  "n_failed": 0,
+  "total_runtime_seconds": 63.08226203918457,
+  "model_summaries": {
+    "profiler": {
+      "n_total": 1,
+      "n_successful": 1,
+      "avg_runtime": 63.08226203918457
+    }
+  }
+}

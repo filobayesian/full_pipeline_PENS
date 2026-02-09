@@ -1,0 +1,19 @@
+{
+  "pens_root": "data/PENS",
+  "train_impressions_path": null,
+  "valid_impressions_path": null,
+  "embeddings_path": null,
+  "models": [
+    "profiler"
+  ],
+  "user_fractions": [
+    0.01
+  ],
+  "history_lengths": [
+    5
+  ],
+  "n_seeds": 1,
+  "device": "mps",
+  "n_experiments": 1,
+  "timestamp": "20260208_190922"
+}
