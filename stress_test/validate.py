@@ -115,7 +115,7 @@ def validate_config():
     )
     
     # Check experiment grid
-    assert 'user_fractions' in EXPERIMENT_GRID
+    assert 'user_counts' in EXPERIMENT_GRID
     assert 'history_lengths' in EXPERIMENT_GRID
     assert 'n_seeds' in EXPERIMENT_GRID
     logger.info(f"  Experiment grid: {count_experiments()} total experiments")
@@ -132,7 +132,7 @@ def validate_config():
     # Test experiment generation
     experiments = generate_experiment_grid(
         models=['profiler'],
-        user_fractions=[0.5, 1.0],
+        user_counts=[1000, 5000],
         history_lengths=[10],
         n_seeds=1,
     )
@@ -161,7 +161,7 @@ def validate_data_utils():
     ]
     
     # Test sampling
-    sampled = sample_users_reranker(mock_impressions, fraction=0.5, seed=42)
+    sampled = sample_users_reranker(mock_impressions, n_users=2, seed=42)
     assert len(sampled) < len(mock_impressions)
     logger.info(f"  User sampling: {len(mock_impressions)} -> {len(sampled)} impressions")
     
@@ -218,7 +218,7 @@ def run_quick_test(pens_root: str):
     
     # Load and subsample data
     df = load_profiler_data(pens_root, split='train')
-    df = sample_users_profiler(df, fraction=0.05, seed=42)  # 5% of users
+    df = sample_users_profiler(df, n_users=1000, seed=42)
     df = truncate_history_profiler(df, max_len=20)
     
     logger.info(f"  Test data: {df['user_id'].nunique()} users, {len(df)} interactions")

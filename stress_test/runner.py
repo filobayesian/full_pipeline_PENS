@@ -2,7 +2,7 @@
 Experiment Runner for Stress Testing
 
 This module orchestrates the execution of the stress testing experiment grid,
-running both reranker and profiler experiments across different user fractions
+running both reranker and profiler experiments across different user counts
 and history lengths.
 
 Key functions:
@@ -107,7 +107,7 @@ def run_single_experiment(
             # Sample users
             train_data = sample_users_reranker(
                 train_data,
-                experiment.user_fraction,
+                experiment.user_count,
                 experiment.seed
             )
             
@@ -151,7 +151,7 @@ def run_single_experiment(
             # Sample users
             df = sample_users_profiler(
                 df,
-                experiment.user_fraction,
+                experiment.user_count,
                 experiment.seed
             )
             
@@ -220,9 +220,9 @@ def run_experiment_grid(
     valid_impressions_path: Optional[str] = None,
     embeddings_path: Optional[str] = None,
     models: List[str] = ['reranker', 'profiler'],
-    user_fractions: Optional[List[float]] = None,
+    user_counts: Optional[List[int]] = None,
     history_lengths: Optional[List[int]] = None,
-    n_seeds: int = 3,
+    n_seeds: int = 1,
     device: str = None,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
@@ -236,7 +236,7 @@ def run_experiment_grid(
         valid_impressions_path: Path to valid impressions JSONL
         embeddings_path: Path to embeddings cache
         models: List of models to test
-        user_fractions: List of user fractions (default: from config)
+        user_counts: List of user counts (default: from config)
         history_lengths: List of history lengths (default: from config)
         n_seeds: Number of random seeds
         device: Device to use (default: auto-detect)
@@ -253,7 +253,7 @@ def run_experiment_grid(
     # Generate experiment grid
     experiments = generate_experiment_grid(
         models=models,
-        user_fractions=user_fractions,
+        user_counts=user_counts,
         history_lengths=history_lengths,
         n_seeds=n_seeds,
     )
@@ -264,7 +264,7 @@ def run_experiment_grid(
     # Print experiment summary
     logger.info("\nExperiment Grid Summary:")
     logger.info(f"  Models: {models}")
-    logger.info(f"  User fractions: {user_fractions or EXPERIMENT_GRID['user_fractions']}")
+    logger.info(f"  User counts: {user_counts or EXPERIMENT_GRID['user_counts']}")
     logger.info(f"  History lengths: {history_lengths or EXPERIMENT_GRID['history_lengths']}")
     logger.info(f"  Seeds: {n_seeds}")
     logger.info(f"  Total experiments: {n_experiments}")
@@ -290,7 +290,7 @@ def run_experiment_grid(
         'valid_impressions_path': valid_impressions_path,
         'embeddings_path': embeddings_path,
         'models': models,
-        'user_fractions': user_fractions or EXPERIMENT_GRID['user_fractions'],
+        'user_counts': user_counts or EXPERIMENT_GRID['user_counts'],
         'history_lengths': history_lengths or EXPERIMENT_GRID['history_lengths'],
         'n_seeds': n_seeds,
         'device': device,
@@ -307,7 +307,7 @@ def run_experiment_grid(
     for i, exp in enumerate(experiments):
         logger.info(f"\n{'='*60}")
         logger.info(f"Running experiment {i+1}/{n_experiments}: {exp.experiment_name}")
-        logger.info(f"Model: {exp.model}, Users: {exp.user_fraction}, History: {exp.history_length}, Seed: {exp.seed}")
+        logger.info(f"Model: {exp.model}, Users: {exp.user_count}, History: {exp.history_length}, Seed: {exp.seed}")
         logger.info(f"{'='*60}")
         
         result = run_single_experiment(
@@ -452,11 +452,11 @@ def main():
     )
     
     parser.add_argument(
-        '--user_fractions',
-        type=float,
+        '--user_counts',
+        type=int,
         nargs='+',
         default=None,
-        help='User fractions to test (default: 0.1 0.25 0.5 0.75 1.0)'
+        help='User counts to test (default: 1000 5000 10000 50000)'
     )
     
     parser.add_argument(
@@ -470,7 +470,7 @@ def main():
     parser.add_argument(
         '--n_seeds',
         type=int,
-        default=3,
+        default=1,
         help='Number of random seeds for variance estimation'
     )
     
@@ -516,7 +516,7 @@ def main():
         valid_impressions_path=args.valid_impressions,
         embeddings_path=args.embeddings,
         models=args.models,
-        user_fractions=args.user_fractions,
+        user_counts=args.user_counts,
         history_lengths=args.history_lengths,
         n_seeds=args.n_seeds,
         device=args.device,

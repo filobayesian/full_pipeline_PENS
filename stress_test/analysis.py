@@ -89,7 +89,7 @@ def results_to_dataframe(results: List[Dict[str, Any]]) -> pd.DataFrame:
         
         row = {
             'model': exp.get('model'),
-            'user_fraction': exp.get('user_fraction'),
+            'user_count': exp.get('user_count'),
             'history_length': exp.get('history_length'),
             'seed': exp.get('seed'),
             'experiment_name': exp.get('experiment_name'),
@@ -120,7 +120,7 @@ def results_to_dataframe(results: List[Dict[str, Any]]) -> pd.DataFrame:
 
 def aggregate_results(
     df: pd.DataFrame,
-    group_cols: List[str] = ['model', 'user_fraction', 'history_length'],
+    group_cols: List[str] = ['model', 'user_count', 'history_length'],
 ) -> pd.DataFrame:
     """
     Aggregate results across seeds, computing mean and std.
@@ -163,7 +163,7 @@ def compute_sensitivity_scores(
     metric_col: str = 'metric_auc_mean',
 ) -> Dict[str, float]:
     """
-    Compute sensitivity scores for user fraction and history length.
+    Compute sensitivity scores for user count and history length.
     
     Sensitivity = relative performance drop from max to min setting.
     
@@ -177,18 +177,18 @@ def compute_sensitivity_scores(
     if metric_col not in df.columns:
         return {}
     
-    # Sensitivity to user fraction (averaged over history lengths)
-    user_effect = df.groupby('user_fraction')[metric_col].mean()
+    # Sensitivity to user count (averaged over history lengths)
+    user_effect = df.groupby('user_count')[metric_col].mean()
     user_sensitivity = (user_effect.max() - user_effect.min()) / user_effect.max()
     
-    # Sensitivity to history length (averaged over user fractions)
+    # Sensitivity to history length (averaged over user counts)
     history_effect = df.groupby('history_length')[metric_col].mean()
     history_sensitivity = (history_effect.max() - history_effect.min()) / history_effect.max()
     
     return {
-        'user_fraction_sensitivity': user_sensitivity,
+        'user_count_sensitivity': user_sensitivity,
         'history_length_sensitivity': history_sensitivity,
-        'user_fraction_max': user_effect.idxmax(),
+        'user_count_max': user_effect.idxmax(),
         'history_length_max': history_effect.idxmax(),
     }
 
@@ -215,12 +215,12 @@ def find_minimum_requirements(
     max_metric = df[metric_col].max()
     threshold = max_metric * threshold_fraction
     
-    # Find minimum user fraction for threshold
-    user_means = df.groupby('user_fraction')[metric_col].mean()
-    min_user_fraction = None
-    for uf in sorted(user_means.index):
-        if user_means[uf] >= threshold:
-            min_user_fraction = uf
+    # Find minimum user count for threshold
+    user_means = df.groupby('user_count')[metric_col].mean()
+    min_user_count = None
+    for uc in sorted(user_means.index):
+        if user_means[uc] >= threshold:
+            min_user_count = uc
             break
     
     # Find minimum history length for threshold
@@ -235,7 +235,7 @@ def find_minimum_requirements(
         'max_metric': max_metric,
         'threshold': threshold,
         'threshold_fraction': threshold_fraction,
-        'min_user_fraction': min_user_fraction,
+        'min_user_count': min_user_count,
         'min_history_length': min_history_length,
     }
 
@@ -282,15 +282,15 @@ def generate_sensitivity_plots(
     
     plot_paths = []
     
-    # Plot 1: Metric vs User Fraction (lines for history lengths)
+    # Plot 1: Metric vs User Count (lines for history lengths)
     fig, ax = plt.subplots(figsize=(10, 6))
     
     for hl in sorted(model_df['history_length'].unique()):
         subset = model_df[model_df['history_length'] == hl]
-        subset = subset.sort_values('user_fraction')
+        subset = subset.sort_values('user_count')
         
         ax.plot(
-            subset['user_fraction'],
+            subset['user_count'],
             subset[metric_col],
             marker='o',
             label=f'History={hl}'
@@ -298,15 +298,15 @@ def generate_sensitivity_plots(
         
         if metric_std_col in subset.columns:
             ax.fill_between(
-                subset['user_fraction'],
+                subset['user_count'],
                 subset[metric_col] - subset[metric_std_col],
                 subset[metric_col] + subset[metric_std_col],
                 alpha=0.2
             )
     
-    ax.set_xlabel('User Fraction')
+    ax.set_xlabel('User Count')
     ax.set_ylabel(metric_name)
-    ax.set_title(f'{model.title()}: {metric_name} vs User Fraction')
+    ax.set_title(f'{model.title()}: {metric_name} vs User Count')
     ax.legend()
     ax.grid(True, alpha=0.3)
     
@@ -315,18 +315,18 @@ def generate_sensitivity_plots(
     plt.close(fig)
     plot_paths.append(str(plot_path))
     
-    # Plot 2: Metric vs History Length (lines for user fractions)
+    # Plot 2: Metric vs History Length (lines for user counts)
     fig, ax = plt.subplots(figsize=(10, 6))
     
-    for uf in sorted(model_df['user_fraction'].unique()):
-        subset = model_df[model_df['user_fraction'] == uf]
+    for uc in sorted(model_df['user_count'].unique()):
+        subset = model_df[model_df['user_count'] == uc]
         subset = subset.sort_values('history_length')
         
         ax.plot(
             subset['history_length'],
             subset[metric_col],
             marker='o',
-            label=f'Users={uf*100:.0f}%'
+            label=f'Users={uc}'
         )
         
         if metric_std_col in subset.columns:
@@ -354,7 +354,7 @@ def generate_sensitivity_plots(
         
         pivot = model_df.pivot_table(
             index='history_length',
-            columns='user_fraction',
+            columns='user_count',
             values=metric_col,
             aggfunc='mean'
         )
@@ -368,7 +368,7 @@ def generate_sensitivity_plots(
         )
         
         ax.set_title(f'{model.title()}: {metric_name} Heatmap')
-        ax.set_xlabel('User Fraction')
+        ax.set_xlabel('User Count')
         ax.set_ylabel('History Length')
         
         plot_path = output_path / f'{model}_heatmap.png'
@@ -467,7 +467,7 @@ def generate_report(
         "",
         "## Experiment Configuration",
         "",
-        f"- User fractions: {results['config'].get('user_fractions', [])}",
+        f"- User counts: {results['config'].get('user_counts', [])}",
         f"- History lengths: {results['config'].get('history_lengths', [])}",
         f"- Number of seeds: {results['config'].get('n_seeds', 0)}",
         f"- Total experiments: {results['config'].get('n_experiments', 0)}",
@@ -489,10 +489,10 @@ def generate_report(
             lines.extend([
                 "### AUC Sensitivity",
                 "",
-                f"- User fraction sensitivity: {sens.get('user_fraction_sensitivity', 0):.3f}",
+                f"- User count sensitivity: {sens.get('user_count_sensitivity', 0):.3f}",
                 f"- History length sensitivity: {sens.get('history_length_sensitivity', 0):.3f}",
                 f"- Max AUC: {min_req.get('max_metric', 0):.4f}",
-                f"- Min user fraction for 90% max: {min_req.get('min_user_fraction')}",
+                f"- Min user count for 90% max: {min_req.get('min_user_count')}",
                 f"- Min history length for 90% max: {min_req.get('min_history_length')}",
                 "",
             ])
@@ -501,7 +501,7 @@ def generate_report(
         lines.extend([
             "### Summary by Configuration",
             "",
-            "| User Frac | History | AUC | MRR | nDCG@10 |",
+            "| User Count | History | AUC | MRR | nDCG@10 |",
             "|-----------|---------|-----|-----|---------|",
         ])
         
@@ -510,7 +510,7 @@ def generate_report(
             mrr = row.get('metric_mrr_mean', 0) or 0
             ndcg = row.get('metric_ndcg@10_mean', 0) or 0
             lines.append(
-                f"| {row['user_fraction']} | {row['history_length']} | "
+                f"| {row['user_count']} | {row['history_length']} | "
                 f"{auc:.4f} | {mrr:.4f} | {ndcg:.4f} |"
             )
         
@@ -531,10 +531,10 @@ def generate_report(
             lines.extend([
                 "### Mean |z-score| Sensitivity",
                 "",
-                f"- User fraction sensitivity: {sens.get('user_fraction_sensitivity', 0):.3f}",
+                f"- User count sensitivity: {sens.get('user_count_sensitivity', 0):.3f}",
                 f"- History length sensitivity: {sens.get('history_length_sensitivity', 0):.3f}",
                 f"- Max mean |z|: {min_req.get('max_metric', 0):.4f}",
-                f"- Min user fraction for 90% max: {min_req.get('min_user_fraction')}",
+                f"- Min user count for 90% max: {min_req.get('min_user_count')}",
                 f"- Min history length for 90% max: {min_req.get('min_history_length')}",
                 "",
             ])
@@ -543,7 +543,7 @@ def generate_report(
         lines.extend([
             "### Summary by Configuration",
             "",
-            "| User Frac | History | Mean |z| | Strong Prefs | Coverage |",
+            "| User Count | History | Mean |z| | Strong Prefs | Coverage |",
             "|-----------|---------|---------|--------------|----------|",
         ])
         
@@ -552,7 +552,7 @@ def generate_report(
             strong = row.get('metric_n_strong_prefs_mean', 0) or 0
             coverage = row.get('metric_coverage_mean', 0) or 0
             lines.append(
-                f"| {row['user_fraction']} | {row['history_length']} | "
+                f"| {row['user_count']} | {row['history_length']} | "
                 f"{mean_z:.4f} | {strong:.2f} | {coverage:.4f} |"
             )
         

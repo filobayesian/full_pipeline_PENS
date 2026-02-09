@@ -14,7 +14,7 @@ Usage:
     python -m stress_test run \
         --pens_root data/PENS \
         --models profiler \
-        --user_fractions 0.1 0.5 1.0 \
+        --user_counts 1000 5000 10000 \
         --history_lengths 10 30 \
         --n_seeds 1
 
@@ -46,7 +46,7 @@ Examples:
 
   # Run quick test (small grid)
   python -m stress_test run --pens_root data/PENS \\
-      --models profiler --user_fractions 0.25 1.0 \\
+      --models profiler --user_counts 1000 5000 \\
       --history_lengths 10 50 --n_seeds 1
 
   # Run full reranker experiments
@@ -115,11 +115,11 @@ Examples:
     )
     
     run_parser.add_argument(
-        '--user_fractions',
-        type=float,
+        '--user_counts',
+        type=int,
         nargs='+',
         default=None,
-        help='User fractions to test (default: 0.1 0.25 0.5 0.75 1.0)'
+        help='User counts to test (default: 1000 5000 10000 50000)'
     )
     
     run_parser.add_argument(
@@ -133,8 +133,8 @@ Examples:
     run_parser.add_argument(
         '--n_seeds',
         type=int,
-        default=3,
-        help='Number of random seeds (default: 3)'
+        default=1,
+        help='Number of random seeds (default: 1)'
     )
     
     run_parser.add_argument(
@@ -207,11 +207,11 @@ Examples:
     )
     
     info_parser.add_argument(
-        '--user_fractions',
-        type=float,
+        '--user_counts',
+        type=int,
         nargs='+',
         default=None,
-        help='User fractions'
+        help='User counts'
     )
     
     info_parser.add_argument(
@@ -225,7 +225,7 @@ Examples:
     info_parser.add_argument(
         '--n_seeds',
         type=int,
-        default=3,
+        default=1,
         help='Number of seeds'
     )
     
@@ -263,7 +263,7 @@ Examples:
             valid_impressions_path=args.valid_impressions,
             embeddings_path=args.embeddings,
             models=args.models,
-            user_fractions=args.user_fractions,
+            user_counts=args.user_counts,
             history_lengths=args.history_lengths,
             n_seeds=args.n_seeds,
             device=args.device,
@@ -290,13 +290,13 @@ Examples:
             count_experiments,
         )
         
-        user_fractions = args.user_fractions or EXPERIMENT_GRID['user_fractions']
+        user_counts = args.user_counts or EXPERIMENT_GRID['user_counts']
         history_lengths = args.history_lengths or EXPERIMENT_GRID['history_lengths']
         n_seeds = args.n_seeds
         
         n_experiments = count_experiments(
             models=args.models,
-            user_fractions=user_fractions,
+            user_counts=user_counts,
             history_lengths=history_lengths,
             n_seeds=n_seeds,
         )
@@ -305,19 +305,19 @@ Examples:
         print("STRESS TESTING EXPERIMENT GRID")
         print("=" * 60)
         print(f"\nModels: {args.models}")
-        print(f"User fractions: {user_fractions}")
+        print(f"User counts: {user_counts}")
         print(f"History lengths: {history_lengths}")
         print(f"Seeds: {n_seeds}")
         print(f"\nTotal experiments: {n_experiments}")
         
         # Estimate time
         if 'reranker' in args.models:
-            reranker_exp = len(user_fractions) * len(history_lengths) * n_seeds
+            reranker_exp = len(user_counts) * len(history_lengths) * n_seeds
             print(f"\nReranker: {reranker_exp} experiments")
             print(f"  Estimated time: {reranker_exp * 5:.0f} - {reranker_exp * 10:.0f} minutes")
         
         if 'profiler' in args.models:
-            profiler_exp = len(user_fractions) * len(history_lengths) * n_seeds
+            profiler_exp = len(user_counts) * len(history_lengths) * n_seeds
             print(f"\nProfiler: {profiler_exp} experiments")
             print(f"  Estimated time: {profiler_exp * 1:.0f} - {profiler_exp * 2:.0f} minutes")
         

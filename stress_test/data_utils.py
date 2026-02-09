@@ -7,7 +7,7 @@ for both the reranker and style profiler models.
 Key functions:
 - load_reranker_data: Load impressions JSONL for reranker
 - load_profiler_data: Load canonical DataFrame for profiler
-- sample_users_*: Sample a fraction of users
+- sample_users_*: Sample a fixed number of users
 - truncate_history_*: Truncate user history to max length
 """
 
@@ -80,29 +80,26 @@ def save_reranker_data(
 
 def sample_users_reranker(
     impressions: List[Dict[str, Any]],
-    fraction: float,
+    n_users: int,
     seed: int,
 ) -> List[Dict[str, Any]]:
     """
-    Sample a fraction of users, keeping ALL their impressions.
+    Sample an absolute number of users, keeping ALL their impressions.
     
     Important: We sample users, not impressions, to preserve user-level structure.
     
     Args:
         impressions: List of impression dictionaries
-        fraction: Fraction of users to keep (0.0 to 1.0)
+        n_users: Number of users to keep (>= 1)
         seed: Random seed for reproducibility
         
     Returns:
         Filtered list of impressions
     """
-    if fraction >= 1.0:
-        return impressions
-    
     # Get unique user IDs
     user_ids = list(set(imp.get('user_id') for imp in impressions))
-    n_users = len(user_ids)
-    n_sample = max(1, int(n_users * fraction))
+    total_users = len(user_ids)
+    n_sample = max(1, min(int(n_users), total_users))
     
     # Sample users
     random.seed(seed)
@@ -112,7 +109,7 @@ def sample_users_reranker(
     filtered = [imp for imp in impressions if imp.get('user_id') in sampled_users]
     
     logger.info(
-        f"Sampled {len(sampled_users)}/{n_users} users ({fraction*100:.1f}%), "
+        f"Sampled {len(sampled_users)}/{total_users} users, "
         f"{len(filtered)}/{len(impressions)} impressions"
     )
     
@@ -227,27 +224,24 @@ def load_profiler_data(
 
 def sample_users_profiler(
     df: pd.DataFrame,
-    fraction: float,
+    n_users: int,
     seed: int,
 ) -> pd.DataFrame:
     """
-    Sample a fraction of users, keeping ALL their interactions.
+    Sample an absolute number of users, keeping ALL their interactions.
     
     Args:
         df: DataFrame with canonical schema
-        fraction: Fraction of users to keep (0.0 to 1.0)
+        n_users: Number of users to keep (>= 1)
         seed: Random seed for reproducibility
         
     Returns:
         Filtered DataFrame
     """
-    if fraction >= 1.0:
-        return df
-    
     # Get unique user IDs
     user_ids = df['user_id'].unique().tolist()
-    n_users = len(user_ids)
-    n_sample = max(1, int(n_users * fraction))
+    total_users = len(user_ids)
+    n_sample = max(1, min(int(n_users), total_users))
     
     # Sample users
     random.seed(seed)
@@ -257,7 +251,7 @@ def sample_users_profiler(
     filtered = df[df['user_id'].isin(sampled_users)].copy()
     
     logger.info(
-        f"Sampled {len(sampled_users)}/{n_users} users ({fraction*100:.1f}%), "
+        f"Sampled {len(sampled_users)}/{total_users} users, "
         f"{len(filtered)}/{len(df)} interactions"
     )
     
@@ -337,7 +331,7 @@ def get_profiler_stats(df: pd.DataFrame) -> Dict[str, Any]:
 
 def prepare_experiment_data(
     pens_root: str,
-    user_fraction: float,
+    user_count: int,
     history_length: int,
     seed: int,
     model: str,
@@ -349,7 +343,7 @@ def prepare_experiment_data(
     
     Args:
         pens_root: Root directory containing PENS data
-        user_fraction: Fraction of users to sample
+        user_count: Number of users to sample
         history_length: Maximum history length
         seed: Random seed
         model: 'reranker' or 'profiler'
@@ -368,7 +362,7 @@ def prepare_experiment_data(
         valid_data = load_reranker_data(valid_impressions_path) if valid_impressions_path else None
         
         # Sample users (only from training data)
-        train_data = sample_users_reranker(train_data, user_fraction, seed)
+        train_data = sample_users_reranker(train_data, user_count, seed)
         
         # Truncate history
         train_data = truncate_history_reranker(train_data, history_length)
@@ -387,7 +381,7 @@ def prepare_experiment_data(
         df = load_profiler_data(pens_root, split='train')
         
         # Sample users
-        df = sample_users_profiler(df, user_fraction, seed)
+        df = sample_users_profiler(df, user_count, seed)
         
         # Truncate history
         df = truncate_history_profiler(df, history_length)
