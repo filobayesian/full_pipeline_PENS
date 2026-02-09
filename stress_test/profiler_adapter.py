@@ -10,17 +10,22 @@ Key functions:
 - run_profiler_experiment: Complete profiling pipeline
 """
 
+import json
 import logging
 import sys
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import pandas as pd
 import numpy as np
+import yaml
 
 # Add style_steering source to path
 style_steering_path = Path(__file__).parent.parent / 'style_steering_PENS copy'
 if str(style_steering_path) not in sys.path:
     sys.path.insert(0, str(style_steering_path))
+experimenting_path = style_steering_path / 'experimenting'
+if str(experimenting_path) not in sys.path:
+    sys.path.insert(0, str(experimenting_path))
 
 from headline_style import config_v2 as config
 from headline_style.profiling_v2 import (
@@ -28,6 +33,11 @@ from headline_style.profiling_v2 import (
     compute_alignment_scores,
 )
 from headline_style.metrics_v2 import get_feature_names
+
+from run_profiled_rewriting import (
+    run_experiment_with_config,
+    select_eligible_users,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -81,6 +91,157 @@ def build_profiles(
             'success': False,
             'error': str(e),
         }
+
+
+def compute_population_stats(headline_features_df: pd.DataFrame) -> pd.DataFrame:
+    """Compute population mean/std for all feature columns."""
+    feature_cols = get_feature_names()
+    population_mean = headline_features_df[feature_cols].mean()
+    population_std = headline_features_df[feature_cols].std().replace(0, 1e-6)
+    return pd.DataFrame({
+        'feature': feature_cols,
+        'population_mean': [population_mean[f] for f in feature_cols],
+        'population_std': [population_std[f] for f in feature_cols],
+    })
+
+
+def save_profile_artifacts(
+    outputs_dir: Path,
+    headline_features_df: pd.DataFrame,
+    user_profiles_df: pd.DataFrame,
+    population_stats_df: pd.DataFrame,
+) -> None:
+    """Persist profile artifacts to a directory."""
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    headline_features_df.to_parquet(outputs_dir / "headline_features.parquet", index=False)
+    user_profiles_df.to_parquet(outputs_dir / "user_profiles.parquet", index=False)
+    population_stats_df.to_parquet(outputs_dir / "population_statistics.parquet", index=False)
+
+
+def load_profile_artifacts(outputs_dir: Path) -> Dict[str, Any]:
+    """Load profile artifacts from a directory."""
+    headline_features_df = pd.read_parquet(outputs_dir / "headline_features.parquet")
+    user_profiles_df = pd.read_parquet(outputs_dir / "user_profiles.parquet")
+    pop_stats_df = pd.read_parquet(outputs_dir / "population_statistics.parquet")
+
+    if 'population_mean' in pop_stats_df.columns:
+        population_mean = pop_stats_df.set_index('feature')['population_mean']
+        population_std = pop_stats_df.set_index('feature')['population_std']
+    else:
+        population_mean = pop_stats_df.set_index('feature')['mean']
+        population_std = pop_stats_df.set_index('feature')['std']
+
+    return {
+        'headline_features': headline_features_df,
+        'user_profiles': user_profiles_df,
+        'population_mean': population_mean,
+        'population_std': population_std,
+    }
+
+
+def build_rewriter_config(
+    config_path: Path,
+    profiling_outputs_dir: Path,
+    output_path: Path,
+) -> Dict[str, Any]:
+    """Build rewriter config for stress tests based on config.yaml."""
+    with open(config_path, 'r') as f:
+        base_config = yaml.safe_load(f)
+
+    stress_cfg = base_config.get('stress_test', {})
+    experiment_cfg = base_config.get('experiment', {}).copy()
+    experiment_cfg['n_users'] = stress_cfg.get('n_users', experiment_cfg.get('n_users', 100))
+    experiment_cfg['n_holdout'] = stress_cfg.get('n_headlines_per_user', experiment_cfg.get('n_holdout', 3))
+    experiment_cfg['min_interactions'] = stress_cfg.get('min_interactions', experiment_cfg.get('min_interactions', 30))
+    experiment_cfg['max_concurrent_requests'] = stress_cfg.get('max_concurrent_requests', experiment_cfg.get('max_concurrent_requests', 3))
+    experiment_cfg['use_prompt_caching'] = stress_cfg.get('use_prompt_caching', experiment_cfg.get('use_prompt_caching', True))
+
+    profiling_cfg = base_config.get('profiling', {}).copy()
+    profiling_cfg['outputs_dir'] = str(profiling_outputs_dir)
+    profiling_cfg['headline_features_file'] = "headline_features.parquet"
+    profiling_cfg['user_profiles_file'] = "user_profiles.parquet"
+    profiling_cfg['population_stats_file'] = "population_statistics.parquet"
+
+    output_cfg = base_config.get('output', {}).copy()
+    output_cfg['profiled_results_file'] = str(output_path)
+
+    base_config['experiment'] = experiment_cfg
+    base_config['profiling'] = profiling_cfg
+    base_config['output'] = output_cfg
+
+    return base_config
+
+
+def select_or_load_users(
+    outputs_dir: Path,
+    user_profiles_df: pd.DataFrame,
+    headline_features_df: pd.DataFrame,
+    n_users: int,
+    min_interactions: int,
+    seed: int,
+) -> List[str]:
+    """Load selected users from disk or sample a new fixed list."""
+    users_path = outputs_dir / "selected_users.json"
+    if users_path.exists():
+        with open(users_path, 'r') as f:
+            users = json.load(f)
+        return users
+
+    users = select_eligible_users(
+        user_profiles_df,
+        headline_features_df,
+        n_users=n_users,
+        min_interactions=min_interactions,
+        seed=seed,
+    )
+    with open(users_path, 'w') as f:
+        json.dump(users, f, indent=2)
+    return users
+
+
+def run_rewriter_stress_test(
+    config_path: Path,
+    profiling_outputs_dir: Path,
+    output_path: Path,
+    selected_users: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """Run the profiled rewriter evaluation for a given profiles directory."""
+    config = build_rewriter_config(
+        config_path=config_path,
+        profiling_outputs_dir=profiling_outputs_dir,
+        output_path=output_path,
+    )
+    return run_experiment_with_config(
+        config=config,
+        selected_users=selected_users,
+        output_path=str(output_path),
+    )
+
+
+def compute_rewriter_metrics(results_df: pd.DataFrame) -> Dict[str, float]:
+    """Summarize rewriter results for stress testing."""
+    valid = results_df[results_df['rewritten_title'] != "[ERROR]"]
+    if len(valid) == 0:
+        return {
+            'n_samples': 0,
+            'style_lift_mean': 0.0,
+            'style_lift_std': 0.0,
+            'factual_mean': 0.0,
+            'content_consistent_rate': 0.0,
+            'title_changed_rate': 0.0,
+        }
+
+    factual = valid[valid['meaning_score'] >= 0]
+    content = valid[valid['content_consistent'] >= 0]
+
+    return {
+        'n_samples': len(valid),
+        'style_lift_mean': float(valid['style_lift'].mean()),
+        'style_lift_std': float(valid['style_lift'].std()),
+        'factual_mean': float(factual['meaning_score'].mean()) if len(factual) else 0.0,
+        'content_consistent_rate': float((content['content_consistent'] == 1).mean()) if len(content) else 0.0,
+        'title_changed_rate': float(valid['title_changed'].mean()),
+    }
 
 
 def compute_alignment_metrics(
@@ -248,6 +409,7 @@ def analyze_profile_distribution(
 def run_profiler_experiment(
     df: pd.DataFrame,
     profiler_config: Dict[str, Any],
+    outputs_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
     Run complete profiler experiment.
@@ -288,6 +450,11 @@ def run_profiler_experiment(
         profiler_config
     )
     
+    # Save artifacts if requested
+    if outputs_dir is not None:
+        population_stats_df = compute_population_stats(headline_features_df)
+        save_profile_artifacts(outputs_dir, headline_features_df, user_profiles_df, population_stats_df)
+
     # Additional analysis
     distribution = analyze_profile_distribution(user_profiles_df)
     
@@ -298,6 +465,7 @@ def run_profiler_experiment(
         'distribution': distribution,
         'n_interactions': len(df),
         'n_users': df['user_id'].nunique(),
+        'outputs_dir': str(outputs_dir) if outputs_dir is not None else None,
     }
 
 

@@ -160,6 +160,30 @@ def truncate_history_reranker(
     return truncated
 
 
+def filter_impressions_by_users(
+    impressions: List[Dict[str, Any]],
+    user_ids: set,
+) -> List[Dict[str, Any]]:
+    """
+    Filter impressions to a set of user IDs.
+
+    Args:
+        impressions: List of impression dictionaries
+        user_ids: Set of allowed user IDs
+
+    Returns:
+        Filtered list of impressions
+    """
+    if not user_ids:
+        return []
+
+    filtered = [imp for imp in impressions if imp.get('user_id') in user_ids]
+    logger.info(
+        f"Filtered impressions by users: {len(filtered)}/{len(impressions)} retained"
+    )
+    return filtered
+
+
 def get_reranker_stats(impressions: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Compute statistics for reranker impressions.

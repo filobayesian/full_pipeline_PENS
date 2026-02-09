@@ -85,6 +85,8 @@ def results_to_dataframe(results: List[Dict[str, Any]]) -> pd.DataFrame:
     for result in results:
         exp = result.get('experiment', {})
         metrics = result.get('metrics', {}) or {}
+        rewriter_metrics = result.get('rewriter_metrics', {}) or {}
+        rewriter_degradation = result.get('rewriter_degradation', {}) or {}
         data_stats = result.get('data_stats', {}) or {}
         
         row = {
@@ -101,6 +103,14 @@ def results_to_dataframe(results: List[Dict[str, Any]]) -> pd.DataFrame:
         for key, value in metrics.items():
             if isinstance(value, (int, float)):
                 row[f'metric_{key}'] = value
+
+        for key, value in rewriter_metrics.items():
+            if isinstance(value, (int, float)):
+                row[f'rewriter_{key}'] = value
+
+        for key, value in rewriter_degradation.items():
+            if isinstance(value, (int, float)):
+                row[f'degradation_{key}'] = value
         
         # Add data stats (handle nested for reranker)
         if isinstance(data_stats, dict):
@@ -557,6 +567,24 @@ def generate_report(
             )
         
         lines.append("")
+
+        # Rewriter degradation summary (if available)
+        if 'degradation_style_lift_ratio_mean' in profiler_df.columns:
+            lines.extend([
+                "### Rewriter Degradation vs Best-Case",
+                "",
+                "| User Count | History | Lift Ratio | Factual Ratio | Consistency Ratio |",
+                "|-----------|---------|-----------|---------------|-------------------|",
+            ])
+            for _, row in profiler_df.iterrows():
+                lift_ratio = row.get('degradation_style_lift_ratio_mean', 0) or 0
+                factual_ratio = row.get('degradation_factual_ratio_mean', 0) or 0
+                consistency_ratio = row.get('degradation_content_consistent_ratio_mean', 0) or 0
+                lines.append(
+                    f"| {row['user_count']} | {row['history_length']} | "
+                    f"{lift_ratio:.3f} | {factual_ratio:.3f} | {consistency_ratio:.3f} |"
+                )
+            lines.append("")
     
     # Write report
     report_content = '\n'.join(lines)

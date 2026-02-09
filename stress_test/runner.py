@@ -19,12 +19,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import torch
+import pandas as pd
 
 from .config import (
     EXPERIMENT_GRID,
     RERANKER_CONFIG,
     PROFILER_CONFIG,
     OUTPUT_CONFIG,
+    BEST_CASE,
     ExperimentConfig,
     generate_experiment_grid,
     count_experiments,
@@ -36,6 +38,7 @@ from .data_utils import (
     sample_users_profiler,
     truncate_history_reranker,
     truncate_history_profiler,
+    filter_impressions_by_users,
     get_reranker_stats,
     get_profiler_stats,
 )
@@ -43,7 +46,14 @@ from .reranker_adapter import (
     run_reranker_experiment,
     load_embeddings_cache,
 )
-from .profiler_adapter import run_profiler_experiment
+from .profiler_adapter import (
+    run_profiler_experiment,
+    load_profile_artifacts,
+    build_rewriter_config,
+    select_or_load_users,
+    run_rewriter_stress_test,
+    compute_rewriter_metrics,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,6 +71,87 @@ def get_device() -> str:
     return 'cpu'
 
 
+def _compute_degradation_metrics(
+    scenario: Dict[str, float],
+    best_case: Dict[str, float],
+) -> Dict[str, float]:
+    """Compute degradation ratios vs best case."""
+    def ratio(key: str) -> float:
+        base = best_case.get(key, 0.0)
+        value = scenario.get(key, 0.0)
+        return (value / base) if base else 0.0
+
+    return {
+        'style_lift_ratio': ratio('style_lift_mean'),
+        'factual_ratio': ratio('factual_mean'),
+        'content_consistent_ratio': ratio('content_consistent_rate'),
+        'title_changed_ratio': ratio('title_changed_rate'),
+    }
+
+
+def ensure_best_case_artifacts(
+    pens_root: str,
+    output_dir: Path,
+    profiler_config: Dict[str, Any],
+    rewriter_config_path: Path,
+) -> Dict[str, Any]:
+    """Build best-case profiles and rewriter results if missing."""
+    best_case_dir = output_dir / "best_case"
+    profiles_path = best_case_dir / "user_profiles.parquet"
+    rewriter_results_path = best_case_dir / "rewriter_results.csv"
+    metrics_path = best_case_dir / "rewriter_metrics.json"
+
+    if not profiles_path.exists():
+        df = load_profiler_data(pens_root, split='train')
+        df = sample_users_profiler(df, BEST_CASE['user_count'], seed=0)
+        df = truncate_history_profiler(df, BEST_CASE['history_length'])
+        build_result = run_profiler_experiment(
+            df,
+            profiler_config,
+            outputs_dir=best_case_dir,
+        )
+        if not build_result['success']:
+            raise RuntimeError(f"Best-case profiling failed: {build_result['error']}")
+
+    artifacts = load_profile_artifacts(best_case_dir)
+    config = build_rewriter_config(
+        config_path=rewriter_config_path,
+        profiling_outputs_dir=best_case_dir,
+        output_path=rewriter_results_path,
+    )
+
+    selected_users = select_or_load_users(
+        outputs_dir=best_case_dir,
+        user_profiles_df=artifacts['user_profiles'],
+        headline_features_df=artifacts['headline_features'],
+        n_users=config['experiment']['n_users'],
+        min_interactions=config['experiment']['min_interactions'],
+        seed=42,
+    )
+
+    if rewriter_results_path.exists():
+        best_case_results = pd.read_csv(rewriter_results_path)
+    else:
+        best_case_results = run_rewriter_stress_test(
+            config_path=rewriter_config_path,
+            profiling_outputs_dir=best_case_dir,
+            output_path=rewriter_results_path,
+            selected_users=selected_users,
+        )
+
+    best_case_metrics = compute_rewriter_metrics(best_case_results)
+    metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(metrics_path, 'w') as f:
+        json.dump(best_case_metrics, f, indent=2)
+
+    return {
+        'best_case_dir': best_case_dir,
+        'selected_users': selected_users,
+        'rewriter_metrics': best_case_metrics,
+        'rewriter_results_path': str(rewriter_results_path),
+    }
+
+
 def run_single_experiment(
     experiment: ExperimentConfig,
     pens_root: str,
@@ -68,6 +159,8 @@ def run_single_experiment(
     valid_impressions_path: Optional[str] = None,
     embeddings_path: Optional[str] = None,
     device: str = 'cpu',
+    best_case_info: Optional[Dict[str, Any]] = None,
+    rewriter_config_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
     Run a single stress test experiment.
@@ -110,6 +203,12 @@ def run_single_experiment(
                 experiment.user_count,
                 experiment.seed
             )
+
+            sampled_user_ids = {
+                imp.get('user_id') for imp in train_data if imp.get('user_id') is not None
+            }
+            if valid_data:
+                valid_data = filter_impressions_by_users(valid_data, sampled_user_ids)
             
             # Truncate history
             train_data = truncate_history_reranker(
@@ -165,9 +264,14 @@ def run_single_experiment(
             result['data_stats'] = get_profiler_stats(df)
             
             # Run experiment
+            scenario_dir = None
+            if best_case_info and rewriter_config_path:
+                scenario_dir = Path(best_case_info['best_case_dir']).parent / 'experiments' / 'profiler' / experiment.experiment_name
+
             exp_result = run_profiler_experiment(
                 df,
-                experiment.model_config
+                experiment.model_config,
+                outputs_dir=scenario_dir,
             )
             
             if exp_result['success']:
@@ -175,6 +279,27 @@ def run_single_experiment(
                 result['success'] = True
             else:
                 result['error'] = exp_result['error']
+
+            if exp_result['success'] and best_case_info and rewriter_config_path and scenario_dir is not None:
+                scenario_dir.mkdir(parents=True, exist_ok=True)
+
+                rewriter_results_path = scenario_dir / "rewriter_results.csv"
+                try:
+                    scenario_results = run_rewriter_stress_test(
+                        config_path=rewriter_config_path,
+                        profiling_outputs_dir=scenario_dir,
+                        output_path=rewriter_results_path,
+                        selected_users=best_case_info['selected_users'],
+                    )
+                    scenario_metrics = compute_rewriter_metrics(scenario_results)
+                    degradation = _compute_degradation_metrics(
+                        scenario_metrics,
+                        best_case_info['rewriter_metrics'],
+                    )
+                    result['rewriter_metrics'] = scenario_metrics
+                    result['rewriter_degradation'] = degradation
+                except Exception as e:
+                    result['rewriter_error'] = str(e)
         
         else:
             raise ValueError(f"Unknown model: {experiment.model}")
@@ -301,6 +426,23 @@ def run_experiment_grid(
     with open(run_dir / 'config.json', 'w') as f:
         json.dump(run_config, f, indent=2)
     
+    # Prepare best-case artifacts for profiler rewriter evaluation
+    best_case_info = None
+    rewriter_config_path = None
+    if 'profiler' in models:
+        rewriter_config_path = (
+            Path(__file__).parent.parent
+            / 'style_steering_PENS copy'
+            / 'experimenting'
+            / 'config.yaml'
+        )
+        best_case_info = ensure_best_case_artifacts(
+            pens_root=pens_root,
+            output_dir=output_path,
+            profiler_config=PROFILER_CONFIG,
+            rewriter_config_path=rewriter_config_path,
+        )
+
     # Run experiments
     results = []
     
@@ -317,6 +459,8 @@ def run_experiment_grid(
             valid_impressions_path=valid_impressions_path,
             embeddings_path=embeddings_path,
             device=device,
+            best_case_info=best_case_info,
+            rewriter_config_path=rewriter_config_path,
         )
         
         # Save individual result

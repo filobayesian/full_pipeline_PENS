@@ -24,6 +24,11 @@ EXPERIMENT_GRID = {
     'n_seeds': 1,
 }
 
+BEST_CASE = {
+    'user_count': 50000,
+    'history_length': 50,
+}
+
 
 # =============================================================================
 # Reranker Configuration
