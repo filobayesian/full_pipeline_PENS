@@ -71,6 +71,7 @@ Thumbs.db
 .claude/
 
 # Project data / outputs
+data/
 data/*
 !data/.gitkeep
 **/data/*
